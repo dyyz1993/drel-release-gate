@@ -1,0 +1,17 @@
+name = "drel-release-gate"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Routes: 部署时按你的 zone 配置
+# route = { pattern = "release-gate.xbrowser.dev", custom_domain = true }
+
+[vars]
+# 公开信息
+REPO = "dyyz1993/xbrowser"
+ENVIRONMENT = "production"
+
+# Secrets (wrangler secret put):
+# GITHUB_APP_ID
+# GITHUB_APP_PRIVATE_KEY
+# UI_SHARED_SECRET
