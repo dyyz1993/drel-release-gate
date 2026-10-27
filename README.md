@@ -169,7 +169,8 @@ curl -fsS -X POST https://approve.xbrowser.dev/v1/admin/projects \
       "actorPublicKey":"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----",
       "allowedLogins":["your-github-login"],
       "minApprovals":1,
-      "selfApprovalAllowed":false
+      "selfApprovalAllowed":false,
+      "providerApprovalMode":"user"
     }]
   }'
 ```
@@ -188,6 +189,11 @@ actor assertion is signed by the Ed25519 private key whose public key is
 configured in the project environment policy. The assertion must include
 `requestId`, `ticketHash`, `actionId`, `login`, `sub`, issuer, audience, and
 an unexpired `jti`.
+
+`providerApprovalMode` defaults to `user`. The transitional
+`service_account` mode is available only for an explicitly configured
+single-tenant owner-token fallback; decisions remain ACL-checked and the audit
+event records whether the provider call used the service account fallback.
 
 ## Deployment
 
@@ -213,9 +219,9 @@ version tag after the CI gate is green; the Release workflow reruns the same
 checks, verifies the tag against `package.json`, and deploys with Wrangler:
 
 ```bash
-git tag -a v1.1.1 -m "drel-release-gate v1.1.1"
+git tag -a v1.1.2 -m "drel-release-gate v1.1.2"
 git push origin master
-git push origin v1.1.1
+git push origin v1.1.2
 ```
 
 The repository must have `CLOUDFLARE_API_TOKEN` and

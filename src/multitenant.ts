@@ -45,13 +45,14 @@ function requestIdFromBody(value: unknown): string {
 function targetFor(
   repository: string,
   environment: string,
-  installationId?: number
+  installationId?: number,
+  allowOwnerFallback = false
 ): DeploymentTarget {
   return {
     repo: repository,
     environment,
     installationId,
-    allowOwnerFallback: false,
+    allowOwnerFallback,
   };
 }
 
@@ -308,7 +309,12 @@ export async function handleDecision(
       typeof (body.values as Record<string, unknown>).comment === 'string'
         ? String((body.values as Record<string, unknown>).comment)
         : undefined,
-      targetFor(project.repository, project.environment, project.installationId)
+      targetFor(
+        project.repository,
+        project.environment,
+        project.installationId,
+        project.policy.providerApprovalMode === 'service_account'
+      )
     );
   } catch {
     await stub.fetch('https://ticket.internal/release', { method: 'POST' });
@@ -340,6 +346,9 @@ export async function handleDecision(
       sha: claims.sha,
       policyVersion: project.policyVersion,
       result: state,
+      details: {
+        providerActor: result.usedOwnerFallback ? 'service_account' : 'user',
+      },
     });
   } catch {
     return error('audit_failed', 503);

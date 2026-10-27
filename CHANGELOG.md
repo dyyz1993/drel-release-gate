@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2 - 2026-10-28
+
+- Add an explicit `providerApprovalMode` policy so the transitional
+  single-tenant owner-token fallback can be enabled only by opt-in.
+- Record whether the provider action used a service account in the audit
+  event.
+
 ## 1.1.1 - 2026-10-28
 
 - Use the required SQLite Durable Object migration for `TenantStore` on the

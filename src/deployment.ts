@@ -79,7 +79,7 @@ export async function approveDeployment(
   state: 'approved' | 'rejected',
   comment?: string,
   target?: DeploymentTarget
-): Promise<{ ok: boolean; detail: unknown }> {
+): Promise<{ ok: boolean; detail: unknown; usedOwnerFallback: boolean }> {
   const repo = target?.repo ?? env.REPO;
   const environment = target?.environment ?? env.ENVIRONMENT;
   const token = await getFreshToken(env, target);
@@ -117,12 +117,14 @@ export async function approveDeployment(
   // GitHub App installation tokens cannot act as a required human reviewer.
   // The owner-scoped token is an explicit opt-in fallback for a personal
   // release gate; it is never used when the App call succeeds.
+  let usedOwnerFallback = false;
   if (
     !res.ok
     && res.status === 422
     && env.OWNER_GITHUB_TOKEN
     && target?.allowOwnerFallback !== false
   ) {
+    usedOwnerFallback = true;
     res = await fetch(
       `${GITHUB_API}/repos/${repo}/actions/runs/${runId}/pending_deployments`,
       {
@@ -137,5 +139,5 @@ export async function approveDeployment(
     );
     detail = res.ok ? await res.json() : { error: await res.text(), status: res.status };
   }
-  return { ok: res.ok, detail };
+  return { ok: res.ok, detail, usedOwnerFallback };
 }
