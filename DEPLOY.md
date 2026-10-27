@@ -5,8 +5,7 @@ Step-by-step commands from zero to running Worker.
 ## 1. Install
 
 ```bash
-cd /Users/xuyingzhou/Project/study-node-ts/drel-release-gate
-npm install
+npm ci
 ```
 
 ## 2. Cloudflare login
@@ -54,7 +53,7 @@ npm run deploy
 
 Wrangler prints the deployed URL. For a custom domain:
 
-1. Add `route = { pattern = "release-gate.xbrowser.dev", custom_domain = true }` to `wrangler.toml`.
+1. Add `route = { pattern = "approve.xbrowser.dev", custom_domain = true }` to `wrangler.toml`.
 2. `npm run deploy`.
 
 ## 6. Smoke Test
@@ -75,7 +74,19 @@ Send `Authorization: Bearer <UI_SHARED_SECRET>` when minting the ticket.
 - Private key: generate new in GitHub App settings, then re-run `wrangler secret put GITHUB_APP_PRIVATE_KEY`.
 - UI secret: `openssl rand -hex 32` then `wrangler secret put UI_SHARED_SECRET`; update UI config.
 
-## 9. Teardown
+## 9. Release Through CI
+
+Do not deploy a release tag by hand. Configure these GitHub Actions secrets
+first:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+Then update the package version and push an annotated `vX.Y.Z` tag. The
+Release workflow reruns CI and deploys only when the CI job is green. See
+`CONTRIBUTING.md` for the complete process.
+
+## 10. Teardown
 
 If you want to remove everything:
 

@@ -1,6 +1,11 @@
 node_modules/
 .wrangler/
 .dev.vars
+.env
+.env.*
 dist/
 *.log
+*.pem
+*.key
 .DS_Store
+.learnings/
