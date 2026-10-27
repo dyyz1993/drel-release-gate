@@ -5,8 +5,6 @@ export interface Env {
   OIDC_AUDIENCE?: string;
   OIDC_ISSUER?: string;
   GITHUB_OIDC_JWKS_URL?: string;
-  ACTOR_ISSUER?: string;
-  ACTOR_AUDIENCE?: string;
 
   // Secrets
   GITHUB_APP_ID: string;

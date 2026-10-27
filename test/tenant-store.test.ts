@@ -35,11 +35,7 @@ function project(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     repository: 'owner/repo',
     environments: {
       production: {
-        actorPublicKey: '-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',
-        allowedLogins: ['octocat'],
-        allowedSubjects: [],
         minApprovals: 1,
-        selfApprovalAllowed: false,
         providerApprovalMode: 'user',
       },
     },
@@ -69,7 +65,7 @@ describe('TenantStore', () => {
       tenantId: 'ten_1',
       projectId: 'prj_1',
       environment: 'production',
-      policy: { allowedLogins: ['octocat'] },
+      policy: { minApprovals: 1, providerApprovalMode: 'user' },
     });
   });
 

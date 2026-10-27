@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 - 2026-10-28
+
+- Remove the default Drel device-key and Ed25519 actor-assertion requirement.
+- Redeem third-party decisions with a tenant-scoped one-time ticket plus the
+  structured `{ticket,requestId,actionId,expectedRevision,values}` body.
+- Simplify project environment policy to approval count and provider mode.
+
 ## 1.1.2 - 2026-10-28
 
 - Add an explicit `providerApprovalMode` policy so the transitional

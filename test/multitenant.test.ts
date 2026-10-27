@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8 } from 'jose';
 import worker from '../src/index';
 import { TenantStore } from '../src/tenant-store';
-import { hashTicket, issueTicket } from '../src/ticket';
+import { issueTicket } from '../src/ticket';
 
 const oidcIssuer = 'https://token.actions.githubusercontent.com';
 const oidcAudience = 'https://approve.example.com';
@@ -55,14 +55,11 @@ async function makeOidcAndAppKey() {
     .setExpirationTime('5m')
     .sign(await importPKCS8(privatePem, 'RS256'));
   const appKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const actorKey = generateKeyPairSync('ed25519');
   return {
     jwt,
     oidcPrivateKey: privatePem,
     jwks: { keys: [{ ...publicJwk, kid: 'oidc-key', alg: 'RS256', use: 'sig' }] },
     appPrivateKey: appKey.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
-    actorPublicKey: actorKey.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
-    actorPrivateKey: actorKey.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
   };
 }
 
@@ -86,8 +83,6 @@ function makeEnv(fixture: Awaited<ReturnType<typeof makeOidcAndAppKey>>) {
     OIDC_ISSUER: oidcIssuer,
     OIDC_AUDIENCE: oidcAudience,
     GITHUB_OIDC_JWKS_URL: 'https://example.com/jwks',
-    ACTOR_ISSUER: 'drel',
-    ACTOR_AUDIENCE: 'drel-approval',
     TENANTS: tenants,
     APPROVALS: {
       idFromName: () => 'ticket',
@@ -103,7 +98,7 @@ function makeEnv(fixture: Awaited<ReturnType<typeof makeOidcAndAppKey>>) {
   } as any;
 }
 
-function projectBody(actorPublicKey: string) {
+function projectBody() {
   return {
     tenantId: 'ten_1',
     projectId: 'prj_1',
@@ -112,10 +107,7 @@ function projectBody(actorPublicKey: string) {
     allowedWorkflowRefs: [workflowRef],
     environments: [{
       name: 'production',
-      actorPublicKey,
-      allowedLogins: ['octocat'],
       minApprovals: 1,
-      selfApprovalAllowed: false,
     }],
   };
 }
@@ -168,7 +160,7 @@ describe('multi-tenant approval routes', () => {
         Authorization: `Bearer ${env.ADMIN_SECRET}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(projectBody(fixture.actorPublicKey)),
+      body: JSON.stringify(projectBody()),
     }), env);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -188,7 +180,7 @@ describe('multi-tenant approval routes', () => {
         Authorization: `Bearer ${env.ADMIN_SECRET}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(projectBody(fixture.actorPublicKey)),
+      body: JSON.stringify(projectBody()),
     }), env);
 
     const response = await worker.fetch(new Request('https://example.com/v1/ci/tickets', {
@@ -239,7 +231,7 @@ describe('multi-tenant approval routes', () => {
     expect(response.status).toBe(404);
   });
 
-  it('accepts a scoped ticket only with an allowed actor assertion', async () => {
+  it('accepts a scoped ticket without a device identity assertion', async () => {
     const fixture = await makeOidcAndAppKey();
     const env = makeEnv(fixture);
     const admin = await worker.fetch(new Request('https://example.com/v1/admin/projects', {
@@ -248,7 +240,7 @@ describe('multi-tenant approval routes', () => {
         Authorization: `Bearer ${env.ADMIN_SECRET}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(projectBody(fixture.actorPublicKey)),
+      body: JSON.stringify(projectBody()),
     }), env);
     expect(admin.status).toBe(200);
 
@@ -268,22 +260,6 @@ describe('multi-tenant approval routes', () => {
       policyVersion: 1,
       ticketVersion: 2,
     }, env.TICKET_SECRET, 900);
-    const assertion = await new SignJWT({
-      login: 'octocat',
-      requestId: 'apr_123',
-      ticketHash: await hashTicket(ticket),
-      actionId: 'approve',
-      deviceKey: 'device-1',
-    })
-      .setProtectedHeader({ alg: 'EdDSA' })
-      .setSubject('github:123')
-      .setIssuer('drel')
-      .setAudience('drel-approval')
-      .setJti('assertion-nonce')
-      .setIssuedAt()
-      .setExpirationTime('2m')
-      .sign(await importPKCS8(fixture.actorPrivateKey, 'EdDSA'));
-
     vi.stubGlobal('fetch', makeGithubFetch(fixture.jwks));
     const response = await worker.fetch(new Request(
       'https://example.com/v1/approvals/apr_123/decision',
@@ -292,10 +268,10 @@ describe('multi-tenant approval routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ticket,
+          requestId: 'apr_123',
           actionId: 'approve',
           expectedRevision: 1,
           values: {},
-          actorAssertion: assertion,
         }),
       }
     ), env);
@@ -305,5 +281,43 @@ describe('multi-tenant approval routes', () => {
       state: 'approved',
       provider: 'github',
     });
+  });
+
+  it('requires the decision requestId to match the ticket route', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    const ticket = await issueTicket({
+      repo: repository,
+      runId: 12345,
+      environment: 'production',
+      requestId: 'apr_123',
+      nonce: 'nonce-456',
+      tenantId: 'ten_1',
+      projectId: 'prj_1',
+      provider: 'github',
+      runAttempt: 2,
+      sha,
+      workflowRef,
+      ciActor: 'release-bot',
+      policyVersion: 1,
+      ticketVersion: 2,
+    }, env.TICKET_SECRET, 900);
+
+    const response = await worker.fetch(new Request(
+      'https://example.com/v1/approvals/apr_123/decision',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticket,
+          requestId: 'apr_other',
+          actionId: 'approve',
+          expectedRevision: 1,
+          values: {},
+        }),
+      }
+    ), env);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_request' });
   });
 });

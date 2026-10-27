@@ -12,11 +12,7 @@ export interface TenantRecord {
 }
 
 export interface EnvironmentPolicy {
-  actorPublicKey: string;
-  allowedLogins: string[];
-  allowedSubjects?: string[];
   minApprovals: number;
-  selfApprovalAllowed: boolean;
   providerApprovalMode: 'user' | 'service_account';
 }
 
@@ -45,7 +41,7 @@ export interface AuditEvent {
   projectId?: string;
   requestId?: string;
   eventType: string;
-  actorType: 'ci' | 'human' | 'system';
+  actorType: 'ci' | 'human' | 'system' | 'bearer';
   actorId?: string;
   identityProvider?: string;
   ticketJtiHash?: string;
@@ -76,28 +72,9 @@ export function isValidName(value: unknown): value is string {
 }
 
 export function normalizeEnvironmentPolicy(input: {
-  actorPublicKey?: unknown;
-  allowedLogins?: unknown;
-  allowedSubjects?: unknown;
   minApprovals?: unknown;
-  selfApprovalAllowed?: unknown;
   providerApprovalMode?: unknown;
 }): EnvironmentPolicy {
-  if (typeof input.actorPublicKey !== 'string' || input.actorPublicKey.trim().length < 32) {
-    throw new Error('actorPublicKey is required');
-  }
-  if (!Array.isArray(input.allowedLogins) || input.allowedLogins.some(item => typeof item !== 'string')) {
-    throw new Error('allowedLogins must be a string array');
-  }
-  const allowedLogins = [...new Set(input.allowedLogins
-    .map(login => login.trim().toLowerCase())
-    .filter(Boolean))];
-  if (allowedLogins.length === 0 && (!Array.isArray(input.allowedSubjects) || input.allowedSubjects.length === 0)) {
-    throw new Error('at least one approver is required');
-  }
-  const allowedSubjects = Array.isArray(input.allowedSubjects)
-    ? [...new Set(input.allowedSubjects.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean))]
-    : [];
   const minApprovals = input.minApprovals === undefined ? 1 : Number(input.minApprovals);
   if (!Number.isSafeInteger(minApprovals) || minApprovals < 1) {
     throw new Error('minApprovals must be a positive integer');
@@ -106,11 +83,7 @@ export function normalizeEnvironmentPolicy(input: {
     throw new Error('minApprovals > 1 is not enabled in this phase');
   }
   return {
-    actorPublicKey: input.actorPublicKey.trim(),
-    allowedLogins,
-    allowedSubjects,
     minApprovals,
-    selfApprovalAllowed: input.selfApprovalAllowed === true,
     providerApprovalMode: input.providerApprovalMode === 'service_account' ? 'service_account' : 'user',
   };
 }

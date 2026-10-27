@@ -94,9 +94,10 @@ Release workflow reruns CI and deploys only when the CI job is green. See
 
 After `ADMIN_SECRET` is configured, use `POST /v1/admin/tenants` and
 `POST /v1/admin/projects` from `README.md` to register a repository,
-environment policy, approver allowlist, and actor public key. New CI callers
-should use `POST /v1/ci/tickets` with a GitHub OIDC token instead of the
-legacy shared-secret `/ticket` route.
+environment policy, and allowed workflow refs. New CI callers should use
+`POST /v1/ci/tickets` with a GitHub OIDC token instead of the legacy
+shared-secret `/ticket` route; Drel redeems the returned one-time ticket with
+a structured JSON POST.
 
 ## 11. Teardown
 

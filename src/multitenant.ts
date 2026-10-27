@@ -1,10 +1,5 @@
 import { isAdminAuthorized } from './auth';
 import {
-  ActorError,
-  evaluateApproverPolicy,
-  verifyActorAssertion,
-} from './actor';
-import {
   approveDeployment,
   getPendingDeployment,
   getRunStatus,
@@ -195,10 +190,10 @@ export async function handleDecision(
 ): Promise<Response> {
   let body: {
     ticket?: unknown;
+    requestId?: unknown;
     actionId?: unknown;
     expectedRevision?: unknown;
     values?: unknown;
-    actorAssertion?: unknown;
   };
   try {
     body = await request.json() as typeof body;
@@ -207,7 +202,8 @@ export async function handleDecision(
   }
   if (
     typeof body.ticket !== 'string'
-    || typeof body.actorAssertion !== 'string'
+    || typeof body.requestId !== 'string'
+    || body.requestId !== requestId
     || typeof body.actionId !== 'string'
     || !Number.isSafeInteger(body.expectedRevision)
     || (body.expectedRevision as number) < 1
@@ -256,28 +252,6 @@ export async function handleDecision(
   }
 
   const ticketHash = await hashTicket(body.ticket);
-  let actor;
-  try {
-    actor = await verifyActorAssertion(
-      body.actorAssertion,
-      project.policy.actorPublicKey,
-      {
-        issuer: env.ACTOR_ISSUER || 'drel',
-        audience: env.ACTOR_AUDIENCE || 'drel-approval',
-        requestId,
-        ticketHash,
-        actionId: body.actionId,
-      }
-    );
-  } catch (err) {
-    if (err instanceof ActorError) return error(err.code, err.code === 'invalid_actor_assertion' ? 401 : 403);
-    return error('invalid_actor_assertion', 401);
-  }
-
-  const authorization = evaluateApproverPolicy(project.policy, actor, claims);
-  if (!authorization.allowed) {
-    return error(authorization.code || 'policy_violation', 403);
-  }
 
   const stub = env.APPROVALS.get(env.APPROVALS.idFromName(claims.nonce));
   const claim = await stub.fetch('https://ticket.internal/claim', { method: 'POST' });
@@ -290,9 +264,9 @@ export async function handleDecision(
       projectId: project.projectId,
       requestId,
       eventType: 'approval.decision.received',
-      actorType: 'human',
-      actorId: actor.login,
-      identityProvider: 'github',
+      actorType: 'bearer',
+      actorId: 'one-time-ticket',
+      identityProvider: 'ticket',
       ticketJtiHash: ticketHash,
       provider: 'github',
       target: project.repository,
@@ -335,9 +309,9 @@ export async function handleDecision(
       projectId: project.projectId,
       requestId,
       eventType: 'approval.decided',
-      actorType: 'human',
-      actorId: actor.login,
-      identityProvider: 'github',
+      actorType: 'bearer',
+      actorId: 'one-time-ticket',
+      identityProvider: 'ticket',
       ticketJtiHash: ticketHash,
       provider: 'github',
       target: project.repository,
