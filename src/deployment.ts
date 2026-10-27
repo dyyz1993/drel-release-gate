@@ -65,7 +65,7 @@ export async function approveDeployment(
     throw new Error(`Run ${runId} has no pending deployment for ${env.ENVIRONMENT}`);
   }
 
-  const res = await fetch(
+  let res = await fetch(
     `${GITHUB_API}/repos/${env.REPO}/actions/runs/${runId}/pending_deployments`,
     {
       method: 'POST',
@@ -77,6 +77,25 @@ export async function approveDeployment(
       }),
     }
   );
-  const detail = res.ok ? await res.json() : { error: await res.text(), status: res.status };
+  let detail = res.ok ? await res.json() : { error: await res.text(), status: res.status };
+
+  // GitHub App installation tokens cannot act as a required human reviewer.
+  // The owner-scoped token is an explicit opt-in fallback for a personal
+  // release gate; it is never used when the App call succeeds.
+  if (!res.ok && res.status === 422 && env.OWNER_GITHUB_TOKEN) {
+    res = await fetch(
+      `${GITHUB_API}/repos/${env.REPO}/actions/runs/${runId}/pending_deployments`,
+      {
+        method: 'POST',
+        headers: githubHeaders(env.OWNER_GITHUB_TOKEN),
+        body: JSON.stringify({
+          environment_ids: [envData.id],
+          state,
+          comment: comment || `Deployment ${state} via drel-release-gate`,
+        }),
+      }
+    );
+    detail = res.ok ? await res.json() : { error: await res.text(), status: res.status };
+  }
   return { ok: res.ok, detail };
 }

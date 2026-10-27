@@ -43,4 +43,34 @@ describe('approveDeployment', () => {
 
     await expect(approveDeployment(env, 123, 'approved', 'x')).rejects.toThrow('Failed to get environment');
   });
+
+  it('falls back to the owner token only when GitHub rejects the App token', async () => {
+    vi.spyOn(githubApp, 'createInstallationToken').mockResolvedValue({
+      token: 'app-token',
+      expires_at: '2030-01-01',
+    });
+
+    const env = {
+      REPO: 'dyyz1993/xbrowser',
+      ENVIRONMENT: 'production',
+      OWNER_GITHUB_TOKEN: 'owner-token',
+    } as any;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'waiting', conclusion: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 25155589059 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{
+        id: 7341245189,
+        environment: { id: 25155589059 },
+      }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response('App token cannot approve', { status: 422 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 7341245189 }]), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await approveDeployment(env, 40365039033, 'approved', 'owner fallback');
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect((fetchMock.mock.calls[4][1] as RequestInit).headers).toMatchObject({
+      Authorization: 'Bearer owner-token',
+    });
+  });
 });
