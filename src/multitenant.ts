@@ -290,8 +290,12 @@ export async function handleDecision(
         project.policy.providerApprovalMode === 'service_account'
       )
     );
-  } catch {
+  } catch (err) {
     await stub.fetch('https://ticket.internal/release', { method: 'POST' });
+    console.error(
+      'approval provider failed',
+      err instanceof Error ? err.message : String(err)
+    );
     return error('provider_unavailable', 502);
   }
   if (!result.ok) {
