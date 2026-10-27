@@ -2,8 +2,10 @@ import type { Env } from './types';
 import { isAuthorized } from './auth';
 import { approveDeployment, getRunStatus } from './deployment';
 import { inspectGithubAppConfig } from './github-app';
+import { handleAdmin, handleCiTicket, handleDecision } from './multitenant';
 import { issueTicket, verifyTicket } from './ticket';
 export { ApprovalTicket } from './approval-ticket';
+export { TenantStore } from './tenant-store';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -21,7 +23,31 @@ export default {
     }
 
     if (url.pathname === '/health') {
-      return Response.json({ ok: true, service: 'drel-release-gate' }, { headers: CORS_HEADERS });
+      return Response.json({
+        ok: true,
+        service: 'drel-release-gate',
+        features: ['legacy-approval', 'multi-tenant', 'github-oidc'],
+      }, { headers: CORS_HEADERS });
+    }
+
+    if (url.pathname === '/v1/ci/tickets' && request.method === 'POST') {
+      return await handleCiTicket(request, env);
+    }
+
+    if (url.pathname.startsWith('/v1/admin/') && request.method === 'POST') {
+      return await handleAdmin(request, env, url.pathname);
+    }
+
+    const decisionMatch = url.pathname.match(/^\/v1\/approvals\/([^/]+)\/decision$/);
+    if (decisionMatch && request.method === 'POST') {
+      try {
+        return await handleDecision(request, env, decodeURIComponent(decisionMatch[1]));
+      } catch {
+        return Response.json(
+          { error: 'internal_error' },
+          { status: 500, headers: CORS_HEADERS }
+        );
+      }
     }
 
     if (url.pathname === '/api/review' && request.method === 'POST') {
@@ -52,6 +78,9 @@ export default {
           || claims.requestId !== body.requestId
         ) {
           return Response.json({ error: 'scope_denied' }, { status: 403 });
+        }
+        if (claims.ticketVersion === 2) {
+          return Response.json({ error: 'use_multi_tenant_route' }, { status: 403 });
         }
         const state = body.actionId === 'approve'
           ? 'approved'
