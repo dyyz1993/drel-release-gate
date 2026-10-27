@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 - 2026-10-28
+
+- Treat an empty successful GitHub deployment-approval response as success
+  instead of returning `provider_unavailable` after GitHub already approved.
+- Log provider failures to Worker tail output without including ticket data.
+
 ## 1.2.0 - 2026-10-28
 
 - Remove the default Drel device-key and Ed25519 actor-assertion requirement.

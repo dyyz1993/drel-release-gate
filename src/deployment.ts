@@ -20,6 +20,16 @@ export interface DeploymentTarget {
   allowOwnerFallback?: boolean;
 }
 
+async function responseDetail(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 async function getFreshToken(env: Env, target?: DeploymentTarget): Promise<string> {
   const { createInstallationToken, createInstallationTokenForRepo } = await import('./github-app');
   const result = target
@@ -112,7 +122,10 @@ export async function approveDeployment(
       }),
     }
   );
-  let detail = res.ok ? await res.json() : { error: await res.text(), status: res.status };
+  let detail = await responseDetail(res);
+  if (!res.ok) {
+    detail = { error: detail, status: res.status };
+  }
 
   // GitHub App installation tokens cannot act as a required human reviewer.
   // The owner-scoped token is an explicit opt-in fallback for a personal
@@ -137,7 +150,10 @@ export async function approveDeployment(
         }),
       }
     );
-    detail = res.ok ? await res.json() : { error: await res.text(), status: res.status };
+    detail = await responseDetail(res);
+    if (!res.ok) {
+      detail = { error: detail, status: res.status };
+    }
   }
   return { ok: res.ok, detail, usedOwnerFallback };
 }
