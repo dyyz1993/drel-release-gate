@@ -213,9 +213,9 @@ version tag after the CI gate is green; the Release workflow reruns the same
 checks, verifies the tag against `package.json`, and deploys with Wrangler:
 
 ```bash
-git tag -a v1.1.0 -m "drel-release-gate v1.1.0"
+git tag -a v1.1.1 -m "drel-release-gate v1.1.1"
 git push origin master
-git push origin v1.1.0
+git push origin v1.1.1
 ```
 
 The repository must have `CLOUDFLARE_API_TOKEN` and

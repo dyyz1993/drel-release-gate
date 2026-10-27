@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 - 2026-10-28
+
+- Use the required SQLite Durable Object migration for `TenantStore` on the
+  Cloudflare Workers free plan.
+
 ## 1.1.0 - 2026-10-28
 
 - Add a tenant/project control plane backed by a Durable Object.
