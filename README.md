@@ -9,9 +9,9 @@ The normal path has no long-lived PAT to leak.
 
 The repository keeps the original single-tenant compatibility routes and now
 has a multi-tenant v1 control plane. The v1 path uses GitHub OIDC for CI
-identity, tenant/project-scoped tickets, Ed25519 approver assertions, and
-append-only Durable Object audit events. The legacy `/ticket` and `/api/review`
-routes remain available while existing callers move to v1.
+identity, tenant/project-scoped one-time tickets, and append-only Durable
+Object audit events. The legacy `/ticket` and `/api/review` routes remain
+available while existing callers move to v1.
 
 ## Architecture
 
@@ -94,9 +94,9 @@ Copy the single-line output, then run `wrangler secret put GITHUB_APP_PRIVATE_KE
 | GET    | `/run/:id`      | Status of an Actions run. Requires UI secret.                   |
 | POST   | `/review/:id`   | Approve or reject. Body: `{ state, comment? }`. Requires UI.    |
 | POST   | `/v1/ci/tickets` | Mint a project/environment ticket using a GitHub Actions OIDC token. |
-| POST   | `/v1/approvals/:requestId/decision` | Submit a scoped decision with a signed actor assertion. |
+| POST   | `/v1/approvals/:requestId/decision` | Redeem a scoped one-time ticket and submit a decision. |
 | POST   | `/v1/admin/tenants` | Create a tenant record. Requires `ADMIN_SECRET`. |
-| POST   | `/v1/admin/projects` | Create or update a project policy and approver ACL. |
+| POST   | `/v1/admin/projects` | Create or update a project and environment policy. |
 
 ### Who calls /ticket?
 
@@ -132,10 +132,10 @@ The v1 flow separates the CI request from the human approver:
    Worker verifies issuer, audience, repository, run, attempt, SHA, and
    workflow ref, then cross-checks the run and pending deployment through the
    GitHub App installation token.
-2. `POST /v1/approvals/:requestId/decision` accepts a scoped ticket and an
-   Ed25519 actor assertion. The assertion is bound to the request, ticket
-   hash, and action. The project policy then checks the approver login or
-   subject allowlist and self-approval rule.
+2. `POST /v1/approvals/:requestId/decision` accepts the ticket plus
+   `requestId`, `actionId`, `expectedRevision`, and `values`. The Worker
+   validates ticket scope, atomically consumes the one-use nonce, and calls
+   GitHub. No device key or approver public key is required.
 
 The ticket binds `tenantId`, `projectId`, provider, repository, environment,
 run, run attempt, SHA, workflow ref, request ID, policy version, and a one-use
@@ -166,10 +166,7 @@ curl -fsS -X POST https://approve.xbrowser.dev/v1/admin/projects \
     "allowedWorkflowRefs":["dyyz1993/xbrowser/.github/workflows/release.yml@refs/heads/master"],
     "environments":[{
       "name":"production",
-      "actorPublicKey":"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----",
-      "allowedLogins":["your-github-login"],
       "minApprovals":1,
-      "selfApprovalAllowed":false,
       "providerApprovalMode":"user"
     }]
   }'
@@ -184,16 +181,15 @@ curl -fsS -X POST https://approve.xbrowser.dev/v1/ci/tickets \
   -d '{"environment":"production"}'
 ```
 
-The returned ticket and `submitUrl` go into the Drel approval message. The
-actor assertion is signed by the Ed25519 private key whose public key is
-configured in the project environment policy. The assertion must include
-`requestId`, `ticketHash`, `actionId`, `login`, `sub`, issuer, audience, and
-an unexpired `jti`.
+The returned ticket and `submitUrl` go into the Drel approval message. Drel
+POSTs `{ticket,requestId,actionId,expectedRevision,values}` JSON. Ticket
+expiry, one-time consumption, repository/environment scope, and revision are
+enforced by the Worker.
 
 `providerApprovalMode` defaults to `user`. The transitional
 `service_account` mode is available only for an explicitly configured
-single-tenant owner-token fallback; decisions remain ACL-checked and the audit
-event records whether the provider call used the service account fallback.
+single-tenant owner-token fallback; the audit event records whether the
+provider call used the service account fallback.
 
 ## Deployment
 
@@ -219,9 +215,9 @@ version tag after the CI gate is green; the Release workflow reruns the same
 checks, verifies the tag against `package.json`, and deploys with Wrangler:
 
 ```bash
-git tag -a v1.1.2 -m "drel-release-gate v1.1.2"
+git tag -a v1.2.0 -m "drel-release-gate v1.2.0"
 git push origin master
-git push origin v1.1.2
+git push origin v1.2.0
 ```
 
 The repository must have `CLOUDFLARE_API_TOKEN` and

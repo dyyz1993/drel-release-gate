@@ -30,8 +30,6 @@ REPO = "dyyz1993/xbrowser"
 ENVIRONMENT = "production"
 OIDC_AUDIENCE = "https://approve.xbrowser.dev"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
-ACTOR_ISSUER = "drel"
-ACTOR_AUDIENCE = "drel-approval"
 
 # Secrets (wrangler secret put):
 # GITHUB_APP_ID
