@@ -5,7 +5,13 @@ protected-environment deployments without logging into GitHub.
 
 Built on top of the GitHub **App** model: the Worker holds the App private key
 and mints a short-lived installation token only when the ticket is redeemed.
-There is no long-lived PAT to leak.
+The normal path has no long-lived PAT to leak.
+
+This repository is the open-source, single-tenant reference implementation.
+The multi-tenant evolution is documented separately: repository-scoped
+tenants, GitHub OIDC, approver ACLs, provider adapters, and auditable
+decisions. The current Worker remains deliberately small: one deployment can
+be configured with one repository and one environment.
 
 ## Architecture
 
@@ -32,7 +38,7 @@ There is no long-lived PAT to leak.
 1. Go to https://github.com/settings/apps/new
 2. Fill in:
    - **GitHub App name**: `drel-release-gate`
-   - **Homepage URL**: `https://release-gate.xbrowser.dev` (or wherever you deploy)
+   - **Homepage URL**: `https://approve.xbrowser.dev` (or wherever you deploy)
    - **Webhook**: uncheck **Active** (not needed)
 3. Under **Permissions**, set:
    - **Actions**: Read and write
@@ -60,6 +66,11 @@ wrangler secret put UI_SHARED_SECRET
 wrangler secret put TICKET_SECRET
 # generate with: openssl rand -hex 32
 ```
+
+For a compatibility-only single-tenant deployment, `OWNER_GITHUB_TOKEN` may be
+set as an optional Worker secret. It is used only when GitHub rejects the App
+installation token with `422`; prefer a human OAuth/identity flow for any
+multi-tenant deployment. Do not make a long-lived owner token the normal path.
 
 To prepare the private key for `wrangler secret put`, convert newlines to `\n`:
 
@@ -109,7 +120,10 @@ product flow uses only `approval.submit` plus `/api/review`.
 ## Deployment
 
 ```bash
-npm install
+npm ci
+npm run typecheck
+npm test
+npm run deploy:dry-run
 npm run deploy          # uses wrangler.toml
 npm run tail            # watch live logs
 ```
@@ -117,10 +131,24 @@ npm run tail            # watch live logs
 To bind a custom domain, edit `wrangler.toml`:
 
 ```toml
-route = { pattern = "release-gate.xbrowser.dev", custom_domain = true }
+route = { pattern = "approve.xbrowser.dev", custom_domain = true }
 ```
 
 Then re-run `npm run deploy`.
+
+Production releases must not be deployed from an unverified local tree. Push a
+version tag after the CI gate is green; the Release workflow reruns the same
+checks, verifies the tag against `package.json`, and deploys with Wrangler:
+
+```bash
+git tag -a v1.0.1 -m "drel-release-gate v1.0.1"
+git push origin master
+git push origin v1.0.1
+```
+
+The repository must have `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` configured as GitHub Actions secrets. The release job
+has `needs: verify`, so a red CI run cannot deploy the Worker.
 
 ## Local Dev
 
@@ -136,18 +164,24 @@ npm run dev
 - The `GITHUB_APP_PRIVATE_KEY` is the most sensitive secret; it can mint tokens for the xbrowser repo. Store it only in Cloudflare Secrets.
 - `UI_SHARED_SECRET` is what your UI uses to talk to this Worker. Treat it like a password.
 - Fine-grained permissions are requested per-token at mint time; even if a token leaks, it expires in 1 hour and only has access to `xbrowser`.
-- Optional hardening: add an IP allowlist, or require the UI to sign requests with HMAC.
+- A ticket identifies a CI request, not a human approver. Do not treat a
+  copied ticket as user authentication in a multi-tenant deployment.
+- Optional hardening: add an IP allowlist, or require the UI to sign requests
+  with HMAC.
 
 ## Testing
 
 ```bash
+npm ci
+npm run typecheck
 npm test
+npm run deploy:dry-run
 ```
 
 ## Smoke Test After Deploy
 
 ```bash
-BASE=https://release-gate.xbrowser.dev
+BASE=https://approve.xbrowser.dev
 SECRET=your-ui-shared-secret
 
 # 1. health
