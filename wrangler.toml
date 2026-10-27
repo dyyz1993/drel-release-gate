@@ -18,7 +18,7 @@ new_sqlite_classes = ["ApprovalTicket"]
 
 [[migrations]]
 tag = "v2"
-new_classes = ["TenantStore"]
+new_sqlite_classes = ["TenantStore"]
 
 [[routes]]
 pattern = "approve.xbrowser.dev"
