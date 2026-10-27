@@ -38,7 +38,9 @@ function concat(...parts: Uint8Array[]): Uint8Array {
 function isRsaPkcs1(derBytes: Uint8Array): boolean {
   if (derBytes.length < 2 || derBytes[0] !== 0x30) return false;
   const length = derBytes[1];
-  if (length < 0x80 || 2 + (length & 0x7f) + (length & 0x7f) >= derBytes.length) return false;
+  if (length < 0x80) {
+    return derBytes[2] === 0x02 && derBytes[3] === 0x01;
+  }
   const offset = 2 + (length & 0x7f);
   return derBytes[offset] === 0x02 && derBytes[offset + 1] === 0x01;
 }
@@ -169,7 +171,6 @@ async function createInstallationToken(env: Env): Promise<{ token: string; expir
       permissions: {
         actions: 'write',
         deployments: 'write',
-        contents: 'read',
         metadata: 'read',
       },
     }),
