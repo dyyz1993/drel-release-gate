@@ -65,6 +65,7 @@ describe('approver actor assertions', () => {
       allowedLogins: ['octocat'],
       minApprovals: 1,
       selfApprovalAllowed: false,
+      providerApprovalMode: 'user' as const,
     };
     const ticket = { ciActor: 'octocat' } as TicketClaims;
     expect(evaluateApproverPolicy(policy, {

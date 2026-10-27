@@ -17,6 +17,7 @@ export interface EnvironmentPolicy {
   allowedSubjects?: string[];
   minApprovals: number;
   selfApprovalAllowed: boolean;
+  providerApprovalMode: 'user' | 'service_account';
 }
 
 export interface ProjectRecord {
@@ -80,6 +81,7 @@ export function normalizeEnvironmentPolicy(input: {
   allowedSubjects?: unknown;
   minApprovals?: unknown;
   selfApprovalAllowed?: unknown;
+  providerApprovalMode?: unknown;
 }): EnvironmentPolicy {
   if (typeof input.actorPublicKey !== 'string' || input.actorPublicKey.trim().length < 32) {
     throw new Error('actorPublicKey is required');
@@ -109,6 +111,7 @@ export function normalizeEnvironmentPolicy(input: {
     allowedSubjects,
     minApprovals,
     selfApprovalAllowed: input.selfApprovalAllowed === true,
+    providerApprovalMode: input.providerApprovalMode === 'service_account' ? 'service_account' : 'user',
   };
 }
 

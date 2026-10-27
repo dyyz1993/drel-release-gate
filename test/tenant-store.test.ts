@@ -40,6 +40,7 @@ function project(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
         allowedSubjects: [],
         minApprovals: 1,
         selfApprovalAllowed: false,
+        providerApprovalMode: 'user',
       },
     },
     policyVersion: 1,
