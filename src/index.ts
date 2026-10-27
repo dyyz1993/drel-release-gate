@@ -1,6 +1,7 @@
 import type { Env } from './types';
 import { isAuthorized } from './auth';
 import { approveDeployment, getRunStatus } from './deployment';
+import { inspectGithubAppConfig } from './github-app';
 import { issueTicket, verifyTicket } from './ticket';
 export { ApprovalTicket } from './approval-ticket';
 
@@ -103,6 +104,15 @@ export default {
 
     if (!isAuthorized(request, env)) {
       return Response.json({ error: 'unauthorized' }, { status: 401, headers: CORS_HEADERS });
+    }
+
+    if (url.pathname === '/github-app/health' && request.method === 'GET') {
+      const config = await inspectGithubAppConfig(env);
+      const ok = config.appId === 'valid' && config.privateKey === 'valid';
+      return Response.json({ ok, ...config }, {
+        status: ok ? 200 : 503,
+        headers: { ...CORS_HEADERS, 'Cache-Control': 'no-store' },
+      });
     }
 
     if (url.pathname === '/ticket' && request.method === 'POST') {

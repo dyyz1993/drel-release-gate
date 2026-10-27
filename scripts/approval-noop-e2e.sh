@@ -40,6 +40,9 @@ echo "github_probe=HTTP $PROBE_STATUS"
 if [[ "$PROBE_STATUS" != "200" ]]; then
   cat /tmp/drel-approval-probe.json >&2
   echo >&2
+  curl -sS "$GATE/github-app/health" \
+    -H "Authorization: Bearer $UI_SECRET" >&2 || true
+  echo >&2
   echo "GitHub credentials are not ready; do not submit an approval ticket yet." >&2
   exit 1
 fi

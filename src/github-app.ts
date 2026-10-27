@@ -114,6 +114,36 @@ async function generateAppJwt(env: Env): Promise<string> {
     .sign(key);
 }
 
+async function inspectGithubAppConfig(env: Env): Promise<{
+  appId: 'missing' | 'placeholder' | 'valid';
+  privateKey: 'missing' | 'placeholder' | 'invalid' | 'valid';
+  keyType: 'pkcs8-rsa' | null;
+}> {
+  const rawAppId = String(env.GITHUB_APP_ID ?? '').trim();
+  const appId = rawAppId === ''
+    ? 'missing'
+    : /^\d+$/.test(rawAppId)
+      ? 'valid'
+      : 'placeholder';
+
+  const rawKey = String(env.GITHUB_APP_PRIVATE_KEY ?? '').trim();
+  let privateKey: 'missing' | 'placeholder' | 'invalid' | 'valid' = 'missing';
+  if (rawKey !== '') {
+    if (rawKey.toLowerCase().includes('placeholder')) {
+      privateKey = 'placeholder';
+    } else {
+      try {
+        await importPKCS8(normalizePrivateKey(rawKey), 'RS256');
+        privateKey = 'valid';
+        return { appId, privateKey, keyType: 'pkcs8-rsa' };
+      } catch {
+        privateKey = 'invalid';
+      }
+    }
+  }
+  return { appId, privateKey, keyType: null };
+}
+
 async function getInstallationId(env: Env): Promise<number> {
   const jwt = await generateAppJwt(env);
   const res = await fetch(`${GITHUB_API}/repos/${env.REPO}/installation`, {
@@ -156,6 +186,7 @@ export {
   generateAppJwt,
   getInstallationId,
   createInstallationToken,
+  inspectGithubAppConfig,
   normalizePrivateKey,
   GITHUB_API,
 };

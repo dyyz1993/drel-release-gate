@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import worker from '../src/index';
-import { generateAppJwt, normalizePrivateKey } from '../src/github-app';
+import { generateAppJwt, inspectGithubAppConfig, normalizePrivateKey } from '../src/github-app';
 
 const env = {
   REPO: 'dyyz1993/xbrowser',
   ENVIRONMENT: 'production',
-  GITHUB_APP_ID: '123',
+  GITHUB_APP_ID: 'placeholder',
   GITHUB_APP_PRIVATE_KEY: 'placeholder',
   UI_SHARED_SECRET: 'test-secret-value-long-enough',
   TICKET_SECRET: 'a'.repeat(32),
@@ -30,6 +30,20 @@ describe('worker routing', () => {
     expect(res.status).toBe(200);
     const data = await res.json() as any;
     expect(data.service).toBe('drel-release-gate');
+  });
+
+  it('reports placeholder GitHub App credentials without exposing them', async () => {
+    const req = new Request('https://example.com/github-app/health', {
+      headers: { Authorization: 'Bearer test-secret-value-long-enough' },
+    });
+    const res = await worker.fetch(req, env);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      ok: false,
+      appId: 'placeholder',
+      privateKey: 'placeholder',
+      keyType: null,
+    });
   });
 
   it('should return 401 without auth', async () => {
@@ -92,6 +106,31 @@ describe('worker routing', () => {
 });
 
 describe('GitHub App private-key handling', () => {
+  it('reports placeholder secrets without returning their contents', async () => {
+    const report = await inspectGithubAppConfig({
+      GITHUB_APP_ID: 'placeholder',
+      GITHUB_APP_PRIVATE_KEY: 'placeholder',
+    } as any);
+    expect(report).toEqual({
+      appId: 'placeholder',
+      privateKey: 'placeholder',
+      keyType: null,
+    });
+  });
+
+  it('reports a valid key without returning its contents', async () => {
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const report = await inspectGithubAppConfig({
+      GITHUB_APP_ID: '123456',
+      GITHUB_APP_PRIVATE_KEY: pem,
+    } as any);
+    expect(report.appId).toBe('valid');
+    expect(report.privateKey).toBe('valid');
+    expect(report.keyType).toBe('pkcs8-rsa');
+    expect(JSON.stringify(report)).not.toContain('BEGIN PRIVATE KEY');
+  });
+
   it('accepts JSON-escaped PKCS#8 PEM from a Cloudflare secret', () => {
     const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
