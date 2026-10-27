@@ -8,9 +8,17 @@ workers_dev = false
 name = "APPROVALS"
 class_name = "ApprovalTicket"
 
+[[durable_objects.bindings]]
+name = "TENANTS"
+class_name = "TenantStore"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ApprovalTicket"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["TenantStore"]
 
 [[routes]]
 pattern = "approve.xbrowser.dev"
@@ -20,9 +28,14 @@ custom_domain = true
 # 公开信息
 REPO = "dyyz1993/xbrowser"
 ENVIRONMENT = "production"
+OIDC_AUDIENCE = "https://approve.xbrowser.dev"
+OIDC_ISSUER = "https://token.actions.githubusercontent.com"
+ACTOR_ISSUER = "drel"
+ACTOR_AUDIENCE = "drel-approval"
 
 # Secrets (wrangler secret put):
 # GITHUB_APP_ID
 # GITHUB_APP_PRIVATE_KEY
 # UI_SHARED_SECRET
 # TICKET_SECRET
+# ADMIN_SECRET
