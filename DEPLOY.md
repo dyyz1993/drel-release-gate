@@ -43,6 +43,10 @@ npx wrangler secret put UI_SHARED_SECRET
 # Approval ticket signing secret (at least 32 bytes)
 openssl rand -hex 32
 npx wrangler secret put TICKET_SECRET
+
+# Multi-tenant control-plane secret (separate from CI and Drel secrets)
+openssl rand -hex 32
+npx wrangler secret put ADMIN_SECRET
 ```
 
 ## 5. Deploy
@@ -86,7 +90,15 @@ Then update the package version and push an annotated `vX.Y.Z` tag. The
 Release workflow reruns CI and deploys only when the CI job is green. See
 `CONTRIBUTING.md` for the complete process.
 
-## 10. Teardown
+## 10. Multi-tenant onboarding
+
+After `ADMIN_SECRET` is configured, use `POST /v1/admin/tenants` and
+`POST /v1/admin/projects` from `README.md` to register a repository,
+environment policy, approver allowlist, and actor public key. New CI callers
+should use `POST /v1/ci/tickets` with a GitHub OIDC token instead of the
+legacy shared-secret `/ticket` route.
+
+## 11. Teardown
 
 If you want to remove everything:
 
