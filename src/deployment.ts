@@ -35,12 +35,35 @@ export async function approveDeployment(
 ): Promise<{ ok: boolean; detail: unknown }> {
   const token = await getFreshToken(env);
 
+  const runRes = await fetch(
+    `${GITHUB_API}/repos/${env.REPO}/actions/runs/${runId}`,
+    { headers: githubHeaders(token) }
+  );
+  if (!runRes.ok) throw new Error(`Failed to get run: ${runRes.status} ${await runRes.text()}`);
+  const run = await runRes.json() as { status: string; conclusion: string | null };
+  if (run.status !== 'waiting') {
+    throw new Error(`Run ${runId} is ${run.status}, not waiting for deployment approval`);
+  }
+
   const envRes = await fetch(
     `${GITHUB_API}/repos/${env.REPO}/environments/${env.ENVIRONMENT}`,
     { headers: githubHeaders(token) }
   );
   if (!envRes.ok) throw new Error(`Failed to get environment: ${envRes.status} ${await envRes.text()}`);
   const envData = await envRes.json() as { id: number };
+
+  const pendingRes = await fetch(
+    `${GITHUB_API}/repos/${env.REPO}/actions/runs/${runId}/pending_deployments`,
+    { headers: githubHeaders(token) }
+  );
+  if (!pendingRes.ok) throw new Error(`Failed to get pending deployments: ${pendingRes.status} ${await pendingRes.text()}`);
+  const pending = await pendingRes.json() as Array<{ environment?: { id?: number }; id?: number }>;
+  const pendingForEnvironment = pending.find(item =>
+    item.environment?.id === envData.id || item.id === envData.id
+  );
+  if (!pendingForEnvironment) {
+    throw new Error(`Run ${runId} has no pending deployment for ${env.ENVIRONMENT}`);
+  }
 
   const res = await fetch(
     `${GITHUB_API}/repos/${env.REPO}/actions/runs/${runId}/pending_deployments`,

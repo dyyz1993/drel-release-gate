@@ -40,6 +40,10 @@ openssl rand -hex 32
 # copy the output
 npx wrangler secret put UI_SHARED_SECRET
 # paste the generated hex
+
+# Approval ticket signing secret (at least 32 bytes)
+openssl rand -hex 32
+npx wrangler secret put TICKET_SECRET
 ```
 
 ## 5. Deploy
@@ -59,12 +63,12 @@ See `README.md` § Smoke Test After Deploy.
 
 ## 7. Hook into Drel UI
 
-The Drel UI should call:
+The release workflow should call:
 
-- `POST /review/:runId` with body `{ state: 'approved' | 'rejected', comment }`
-- or `POST /token` if it wants a GitHub token to call directly
+- `POST /ticket` with `{repo,environment,runId,requestId}`
+- then embed `{url: <base>/api/review, ticket}` in the Drel approval
 
-Send `Authorization: Bearer <UI_SHARED_SECRET>` on every call.
+Send `Authorization: Bearer <UI_SHARED_SECRET>` when minting the ticket.
 
 ## 8. Rotate Secrets
 

@@ -9,6 +9,18 @@ const env = {
   GITHUB_APP_ID: '123',
   GITHUB_APP_PRIVATE_KEY: 'placeholder',
   UI_SHARED_SECRET: 'test-secret-value-long-enough',
+  TICKET_SECRET: 'a'.repeat(32),
+  APPROVALS: {
+    idFromName: (name: string) => name,
+    get: () => ({
+      fetch: async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        return url.pathname === '/claim'
+          ? Response.json({ claimed: true })
+          : Response.json({ released: true });
+      },
+    }),
+  },
 } as any;
 
 describe('worker routing', () => {
@@ -24,6 +36,50 @@ describe('worker routing', () => {
     const req = new Request('https://example.com/token', { method: 'POST' });
     const res = await worker.fetch(req, env);
     expect(res.status).toBe(401);
+  });
+
+  it('rejects a third-party review without a ticket before touching GitHub', async () => {
+    const req = new Request('https://example.com/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: 'review-1',
+        actionId: 'approve',
+        expectedRevision: 1,
+        values: {},
+      }),
+    });
+    const res = await worker.fetch(req, env);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 503 rather than a false ticket rejection when GitHub signing is unconfigured', async () => {
+    const ticketResponse = await worker.fetch(new Request('https://example.com/ticket', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-secret-value-long-enough',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        repo: 'dyyz1993/xbrowser',
+        environment: 'production',
+        runId: 123,
+        requestId: 'review-unconfigured',
+      }),
+    }), env);
+    const ticket = (await ticketResponse.json() as any).ticket;
+    const review = await worker.fetch(new Request('https://example.com/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticket,
+        requestId: 'review-unconfigured',
+        actionId: 'approve',
+        expectedRevision: 1,
+        values: {},
+      }),
+    }), env);
+    expect(review.status).toBe(503);
   });
 
   it('should return 404 for unknown path', async () => {

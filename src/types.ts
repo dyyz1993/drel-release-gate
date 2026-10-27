@@ -7,4 +7,6 @@ export interface Env {
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
   UI_SHARED_SECRET: string;
+  TICKET_SECRET: string;
+  APPROVALS: DurableObjectNamespace;
 }

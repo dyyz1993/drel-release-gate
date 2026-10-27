@@ -1,29 +1,30 @@
 # drel-release-gate
 
-Cloudflare Worker that lets a custom UI approve or reject GitHub Actions protected-environment deployments without ever logging into GitHub.
+Cloudflare Worker that lets Drel approve or reject GitHub Actions
+protected-environment deployments without logging into GitHub.
 
-Built on top of the GitHub **App** model: the Worker holds the App private key and mints a short-lived (1 hour) installation token per request, so there is no long-lived PAT to leak.
+Built on top of the GitHub **App** model: the Worker holds the App private key
+and mints a short-lived installation token only when the ticket is redeemed.
+There is no long-lived PAT to leak.
 
 ## Architecture
 
 ```
 +-------------------+         +------------------+        +----------------+
-|                   |  Bearer |                  |  JWT   |                |
-|    Drel UI        +-------->+  Cloudflare      +------->+  GitHub API    |
-| (your frontend)   |  UI     |  Worker          |  App   |                |
-|                   | secret  | (this project)   | key    |                |
+| Release workflow  | Bearer  |  Cloudflare      |  JWT   |  GitHub API    |
+| + Drel UI         +-------->+  Worker          +------->+                |
+|                   | UI secret| (this project)   | App key|                |
 +-------------------+         +------------------+        +----------------+
         |                              |                           |
-        |  POST /token                 |  generate app JWT         |
+        |  POST /ticket                |  run-scoped approval JWT  |
         |------------------------------+-------------------------->|
-        |  -> { token, expires_at }    |                           |
-        |                              |  installation token (1h)  |
-        |                              |<--------------------------+
+        |  -> { ticket, expiresIn }    |                           |
         |                              |                           |
-        |  POST /review/:runId         |                           |
-        |  body: { state: approved }   |  POST pending_deployments |
+        |  POST /api/review            |                           |
+        |  body: { ticket, requestId,  |  installation token (1h)  |
+        |          actionId, ... }     |  POST pending_deployments |
         |------------------------------+-------------------------->|
-        |  -> { ok, detail }           |                           |
+        |  -> { requestId, state, ... }|                           |
 ```
 
 ## GitHub App Setup (once)
@@ -55,6 +56,9 @@ wrangler secret put GITHUB_APP_PRIVATE_KEY
 
 wrangler secret put UI_SHARED_SECRET
 # generate with: openssl rand -hex 32
+
+wrangler secret put TICKET_SECRET
+# generate with: openssl rand -hex 32
 ```
 
 To prepare the private key for `wrangler secret put`, convert newlines to `\n`:
@@ -71,27 +75,36 @@ Copy the single-line output, then run `wrangler secret put GITHUB_APP_PRIVATE_KE
 | Method | Path            | Description                                                     |
 |--------|-----------------|-----------------------------------------------------------------|
 | GET    | `/health`       | Public ping, no auth                                            |
-| POST   | `/token`        | Mint a fresh 1-hour installation token. Requires UI secret.     |
+| POST   | `/ticket`       | Mint a 15-minute, run-scoped approval ticket. Requires UI secret. |
+| POST   | `/api/review`   | Submit the Drel approval body with that ticket.                 |
 | GET    | `/run/:id`      | Status of an Actions run. Requires UI secret.                   |
 | POST   | `/review/:id`   | Approve or reject. Body: `{ state, comment? }`. Requires UI.    |
 
-### Who calls /token?
+### Who calls /ticket?
 
-Your Drel UI backend (or the UI itself, if you're comfortable putting the UI secret in a logged-in browser session). The UI secret acts as your app-level authentication; the Worker then exchanges it for a fresh installation token on demand.
+The xbrowser release workflow waits until the run is blocked on the
+`production` environment, calls `/ticket`, then pushes one Drel approval whose
+`approval.submit` points at `/api/review`. The ticket binds repository, run,
+environment, requestId, expiry, and a one-use nonce.
 
-- If Drel UI calls the Worker directly, the UI just needs to hold `UI_SHARED_SECRET` (long random string).
-- If you have a Drel backend, that backend holds `UI_SHARED_SECRET` and proxies requests, which is the recommended pattern for production.
+- Only the release workflow holds `UI_SHARED_SECRET`; the Drel app receives
+  the opaque, expiring ticket in the message and never sees the shared secret.
+- The Drel app does not call GitHub or mint installation tokens.
 
-### How token exchange works
+### How approval exchange works
 
-1. UI sends `POST /token` with `Authorization: Bearer <UI_SHARED_SECRET>`.
-2. Worker loads `GITHUB_APP_PRIVATE_KEY` from Secrets.
-3. Worker signs a short-lived (5 min) App JWT with RS256.
-4. Worker calls `GET /repos/dyyz1993/xbrowser/installation` with that JWT to get the installation ID.
-5. Worker calls `POST /app/installations/:id/access_tokens` with the JWT, requesting only `actions:write`, `environments:write`, `contents:read`, `metadata:read`, scoped to the `xbrowser` repo.
-6. Worker returns the resulting installation access token to the UI along with `expires_at` (≈1 hour later).
+1. The release workflow posts repo/run/environment/requestId to `/ticket`.
+2. The Worker signs an HS256 ticket valid for 15 minutes.
+3. Drel renders native actions and POSTs the ticket body to
+   `approval.submit.url` (`/api/review`).
+4. The Worker verifies ticket scope, atomically claims the nonce in a Durable
+   Object, checks the run is `waiting` with a pending `production` deployment,
+   then calls GitHub.
+5. A failed GitHub call releases the claim so an approved retry can proceed.
 
-The UI can either use that token directly to call GitHub, or — more commonly — just call `/review/:runId` and let the Worker do the GitHub call. In the second pattern the UI never touches a GitHub token.
+Drel never receives a GitHub token. The legacy authenticated
+`/review/:runId` route remains for manual operator use during rollout, but the
+product flow uses only `approval.submit` plus `/api/review`.
 
 ## Deployment
 
@@ -140,17 +153,18 @@ SECRET=your-ui-shared-secret
 # 1. health
 curl $BASE/health
 
-# 2. mint token
-curl -X POST $BASE/token \
-  -H "Authorization: Bearer $SECRET"
+# 2. mint a run-scoped ticket for a pending run
+curl -X POST $BASE/ticket \
+  -H "Authorization: Bearer $SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"repo":"dyyz1993/xbrowser","environment":"production","runId":123,"requestId":"review-123"}'
 
 # 3. check a run status
 curl $BASE/run/40365039033 \
   -H "Authorization: Bearer $SECRET"
 
-# 4. approve
-curl -X POST $BASE/review/40365039033 \
-  -H "Authorization: Bearer $SECRET" \
+# 4. submit exactly as Drel does
+curl -X POST $BASE/api/review \
   -H "Content-Type: application/json" \
-  -d '{"state":"approved","comment":"Drel UI approved"}'
+  -d '{"ticket":"<ticket>","requestId":"review-123","actionId":"approve","expectedRevision":1,"values":{}}'
 ```

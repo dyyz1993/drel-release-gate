@@ -15,7 +15,12 @@ describe('approveDeployment', () => {
 
     const env = { REPO: 'dyyz1993/xbrowser', ENVIRONMENT: 'production' } as any;
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'waiting', conclusion: null }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 25155589059 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{
+        id: 7341245189,
+        environment: { id: 25155589059 },
+      }]), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 7341245189 }]), { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
@@ -31,7 +36,9 @@ describe('approveDeployment', () => {
     });
 
     const env = { REPO: 'dyyz1993/xbrowser', ENVIRONMENT: 'production' } as any;
-    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('not found', { status: 404 }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'waiting', conclusion: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     await expect(approveDeployment(env, 123, 'approved', 'x')).rejects.toThrow('Failed to get environment');
