@@ -27,4 +27,22 @@ describe('approval tickets', () => {
     await expect(issueTicket({ ...claims, repo: '../repo' }, secret, 60)).rejects.toThrow();
     await expect(issueTicket(claims, secret, 901)).rejects.toThrow();
   });
+
+  it('binds tenant, project, SHA and workflow scope for multi-tenant tickets', async () => {
+    const scoped = {
+      ...claims,
+      tenantId: 'ten_1',
+      projectId: 'prj_1',
+      provider: 'github' as const,
+      runAttempt: 2,
+      sha: 'c'.repeat(40),
+      workflowRef: 'owner/repo/.github/workflows/release.yml@refs/heads/main',
+      ciActor: 'release-bot',
+      policyVersion: 3,
+      ticketVersion: 2,
+    };
+    const token = await issueTicket(scoped, secret, 60);
+    expect(await verifyTicket(token, secret)).toMatchObject(scoped);
+    await expect(issueTicket({ ...scoped, tenantId: undefined }, secret, 60)).rejects.toThrow();
+  });
 });

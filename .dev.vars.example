@@ -2,6 +2,7 @@ GITHUB_APP_ID=123456
 GITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_KEY_HERE\n-----END PRIVATE KEY-----"
 UI_SHARED_SECRET=replace-with-a-long-random-string
 TICKET_SECRET=replace-with-at-least-32-random-characters
+ADMIN_SECRET=replace-with-a-separate-long-random-string
 # Optional compatibility fallback for a single-tenant owner account. Leave
 # unset for normal GitHub App operation; never commit a real token.
 # OWNER_GITHUB_TOKEN=github_pat_...
