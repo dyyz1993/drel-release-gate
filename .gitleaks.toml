@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated Worker bundles and source maps"
+paths = [
+  '''dist/''',
+]
+# This historical commit contains a PEM header/footer template, not a key.
+# Keep the allowlist scoped to the known false-positive commit.
+commits = [
+  '''74b5ed4341099076eb660807a0fd050d6a607726''',
+]

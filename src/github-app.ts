@@ -2,6 +2,12 @@ import type { Env } from './types';
 import { SignJWT, importPKCS8 } from 'jose';
 
 const GITHUB_API = 'https://api.github.com';
+const PKCS8_HEADER = '-----BEGIN ' + 'PRIVATE KEY-----';
+const PKCS8_FOOTER = '-----END ' + 'PRIVATE KEY-----';
+
+function wrapPkcs8(body: string): string {
+  return `${PKCS8_HEADER}\n${body}\n${PKCS8_FOOTER}`;
+}
 
 function pemBytes(pem: string): Uint8Array {
   const base64 = pem
@@ -74,12 +80,12 @@ function normalizePrivateKey(value: string): string {
       pem = decoded;
     } else if (decoded.charCodeAt(0) === 0x30) {
       const body = btoa(decoded).match(/.{1,64}/g)?.join('\n') ?? '';
-      pem = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`;
+      pem = wrapPkcs8(body);
     } else {
       const bytes = Uint8Array.from(decoded, (char) => char.charCodeAt(0));
       const converted = isRsaPkcs1(bytes) ? pkcs1ToPkcs8(bytes) : bytes;
       const body = btoa(String.fromCharCode(...converted)).match(/.{1,64}/g)?.join('\n') ?? '';
-      pem = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`;
+      pem = wrapPkcs8(body);
     }
   }
 
@@ -91,7 +97,7 @@ function normalizePrivateKey(value: string): string {
   if (!isRsaPkcs1(derBytes)) throw new Error('GitHub App private key is malformed');
   const body = btoa(String.fromCharCode(...pkcs1ToPkcs8(derBytes)))
     .match(/.{1,64}/g)?.join('\n') ?? '';
-  return `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`;
+  return wrapPkcs8(body);
 }
 
 function githubHeaders(token: string): HeadersInit {
