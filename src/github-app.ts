@@ -152,9 +152,9 @@ async function inspectGithubAppConfig(env: Env): Promise<{
   return { appId, privateKey, keyType: null };
 }
 
-async function getInstallationId(env: Env): Promise<number> {
+async function getInstallationIdForRepo(env: Env, repo: string): Promise<number> {
   const jwt = await generateAppJwt(env);
-  const res = await fetch(`${GITHUB_API}/repos/${env.REPO}/installation`, {
+  const res = await fetch(`${GITHUB_API}/repos/${repo}/installation`, {
     headers: githubHeaders(jwt),
   });
   if (!res.ok) {
@@ -165,15 +165,19 @@ async function getInstallationId(env: Env): Promise<number> {
 }
 
 // Installation Access Token 有效期 1 小时
-async function createInstallationToken(env: Env): Promise<{ token: string; expires_at: string }> {
-  const installationId = await getInstallationId(env);
+async function createInstallationTokenForRepo(
+  env: Env,
+  repo: string,
+  knownInstallationId?: number
+): Promise<{ token: string; expires_at: string }> {
+  const installationId = knownInstallationId ?? await getInstallationIdForRepo(env, repo);
   const jwt = await generateAppJwt(env);
 
   const res = await fetch(`${GITHUB_API}/app/installations/${installationId}/access_tokens`, {
     method: 'POST',
     headers: githubHeaders(jwt),
     body: JSON.stringify({
-      repositories: [env.REPO.split('/')[1]],
+      repositories: [repo.split('/')[1]],
       permissions: {
         actions: 'write',
         deployments: 'write',
@@ -188,11 +192,21 @@ async function createInstallationToken(env: Env): Promise<{ token: string; expir
   return data;
 }
 
+async function getInstallationId(env: Env): Promise<number> {
+  return await getInstallationIdForRepo(env, env.REPO);
+}
+
+async function createInstallationToken(env: Env): Promise<{ token: string; expires_at: string }> {
+  return await createInstallationTokenForRepo(env, env.REPO);
+}
+
 export {
   githubHeaders,
   generateAppJwt,
   getInstallationId,
+  getInstallationIdForRepo,
   createInstallationToken,
+  createInstallationTokenForRepo,
   inspectGithubAppConfig,
   normalizePrivateKey,
   GITHUB_API,
