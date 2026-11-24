@@ -52,6 +52,28 @@ export async function getRunStatus(
   return await res.json() as ReleaseStatus;
 }
 
+// Returns the first of `branches` whose head is `sha`. "Get a branch" only needs
+// the metadata permission every installation token carries.
+export async function findBranchWithHead(
+  env: Env,
+  target: DeploymentTarget,
+  sha: string,
+  branches: string[]
+): Promise<string | null> {
+  const token = await getFreshToken(env, target);
+  for (const branch of branches) {
+    const res = await fetch(
+      `${GITHUB_API}/repos/${target.repo}/branches/${encodeURIComponent(branch)}`,
+      { headers: githubHeaders(token) }
+    );
+    if (res.status === 404) continue;
+    if (!res.ok) throw new Error(`Failed to get branch ${branch}: ${res.status} ${await res.text()}`);
+    const data = await res.json() as { commit?: { sha?: string } };
+    if (data.commit?.sha === sha) return branch;
+  }
+  return null;
+}
+
 export async function getPendingDeployment(
   env: Env,
   runId: number,

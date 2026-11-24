@@ -58,6 +58,9 @@ export interface AuditEvent {
 
 const REPOSITORY_RE = /^[\w-][\w.-]*\/[\w-][\w.-]*$/;
 const WORKFLOW_REF_RE = /^[\w.-]+\/[\w.-]+\/\.github\/workflows\/[\w.-]+@[\w./:-]+$/;
+const WORKFLOW_REF_PARTS_RE = /^([\w.-]+\/[\w.-]+\/\.github\/workflows\/[\w.-]+)@(.+)$/;
+const BRANCH_REF_PREFIX = 'refs/heads/';
+const TAG_REF_PREFIX = 'refs/tags/';
 
 export function isRepository(value: unknown): value is string {
   return typeof value === 'string' && REPOSITORY_RE.test(value);
@@ -65,6 +68,43 @@ export function isRepository(value: unknown): value is string {
 
 export function isWorkflowRef(value: unknown): value is string {
   return typeof value === 'string' && WORKFLOW_REF_RE.test(value) && value.length <= 512;
+}
+
+function refPart(value: string, prefix: string): string | undefined {
+  return value.startsWith(prefix) && value.length > prefix.length
+    ? value.slice(prefix.length)
+    : undefined;
+}
+
+export type WorkflowRefVerdict =
+  | { kind: 'exact' }
+  | { kind: 'denied' }
+  | { kind: 'tag'; tag: string; branches: string[] };
+
+// A run started by a tag push reports its workflow ref as
+// <workflow>@refs/tags/<tag>, which never equals the branch entry an operator
+// lists. Such a tag is accepted when the tagged commit is the head of a branch
+// listed for the same workflow: it is then the commit that entry stands for.
+export function workflowRefVerdict(
+  allowed: string[] | undefined,
+  claimed: string | undefined
+): WorkflowRefVerdict {
+  if (!allowed?.length) return { kind: 'exact' };
+  if (!claimed) return { kind: 'denied' };
+  if (allowed.includes(claimed)) return { kind: 'exact' };
+
+  const claim = WORKFLOW_REF_PARTS_RE.exec(claimed);
+  const tag = claim ? refPart(claim[2], TAG_REF_PREFIX) : undefined;
+  if (!claim || !tag) return { kind: 'denied' };
+
+  const branches: string[] = [];
+  for (const entry of allowed) {
+    const listed = WORKFLOW_REF_PARTS_RE.exec(entry);
+    if (!listed || listed[1] !== claim[1]) continue;
+    const branch = refPart(listed[2], BRANCH_REF_PREFIX);
+    if (branch) branches.push(branch);
+  }
+  return branches.length ? { kind: 'tag', tag, branches } : { kind: 'denied' };
 }
 
 export function isValidName(value: unknown): value is string {
