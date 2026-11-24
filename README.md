@@ -146,6 +146,21 @@ environment requires a human provider reviewer, a future user-OAuth provider
 adapter must supply that user authorization; an App installation token is
 never presented as a human approval.
 
+`allowedWorkflowRefs` lists the workflow refs that may ask for a ticket, each
+written as `<owner>/<repo>/.github/workflows/<file>@<ref>`. A run matches an
+entry as is, with one rule for releases: GitHub reports a run started by a tag
+push as `…@refs/tags/<tag>`, which never equals a listed branch. Such a tag is
+accepted when the tagged commit is the current head of a branch listed for the
+same workflow file.
+
+```json
+"allowedWorkflowRefs": ["dyyz1993/xbrowser/.github/workflows/release.yml@refs/heads/master"]
+```
+
+This admits `release.yml` from `master` and from any tag that points at the head
+of `master`. A tag on an older commit is refused with `workflow_ref_not_allowed`
+and a `detail` naming the tag and the branch.
+
 Create a tenant and project policy with the admin routes:
 
 ```bash

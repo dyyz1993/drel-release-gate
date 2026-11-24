@@ -1,6 +1,7 @@
 import { isAdminAuthorized } from './auth';
 import {
   approveDeployment,
+  findBranchWithHead,
   getPendingDeployment,
   getRunStatus,
   type DeploymentTarget,
@@ -11,6 +12,7 @@ import {
   normalizeProjectInput,
   recordAudit,
   resolveProject,
+  workflowRefVerdict,
 } from './tenancy';
 import { OidcError, verifyGithubOidc } from './oidc';
 import type { Env } from './types';
@@ -85,10 +87,8 @@ export async function handleCiTicket(request: Request, env: Env): Promise<Respon
   }
   if (!project) return error('project_not_found', 404);
   if (project.status !== 'active') return error('project_suspended', 403);
-  if (
-    project.allowedWorkflowRefs?.length
-    && (!oidc.workflowRef || !project.allowedWorkflowRefs.includes(oidc.workflowRef))
-  ) {
+  const refVerdict = workflowRefVerdict(project.allowedWorkflowRefs, oidc.workflowRef);
+  if (refVerdict.kind === 'denied') {
     return error('scope_denied', 403, { reason: 'workflow_ref_not_allowed' });
   }
   if (!oidc.workflowRef) {
@@ -96,6 +96,26 @@ export async function handleCiTicket(request: Request, env: Env): Promise<Respon
   }
 
   const target = targetFor(project.repository, body.environment, project.installationId);
+  let tagOnBranch: { tag: string; branch: string } | undefined;
+  if (refVerdict.kind === 'tag') {
+    let branch: string | null;
+    try {
+      branch = await findBranchWithHead(env, target, oidc.sha, refVerdict.branches);
+    } catch (err) {
+      console.error(
+        'branch head lookup failed',
+        err instanceof Error ? err.message : String(err)
+      );
+      return error('provider_unavailable', 502);
+    }
+    if (!branch) {
+      return error('scope_denied', 403, {
+        reason: 'workflow_ref_not_allowed',
+        detail: `tag ${refVerdict.tag} is not at the head of ${refVerdict.branches.join(', ')}`,
+      });
+    }
+    tagOnBranch = { tag: refVerdict.tag, branch };
+  }
   let run;
   try {
     run = await getRunStatus(env, oidc.runId, target);
@@ -167,6 +187,7 @@ export async function handleCiTicket(request: Request, env: Env): Promise<Respon
       sha: oidc.sha,
       policyVersion: project.policyVersion,
       result: 'issued',
+      ...(tagOnBranch ? { details: tagOnBranch } : {}),
     });
   } catch {
     return error('audit_failed', 503);

@@ -35,11 +35,12 @@ function makeStorage() {
   };
 }
 
-async function makeOidcAndAppKey() {
-  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const privatePem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
-  const publicJwk = publicKey.export({ format: 'jwk' });
-  const jwt = await new SignJWT({
+// Signs a token for the fixture's run; `claims` replace individual OIDC claims.
+async function signOidc(
+  fixture: { oidcPrivateKey: string },
+  claims: Record<string, unknown>
+): Promise<string> {
+  return new SignJWT({
     repository,
     run_id: '12345',
     run_attempt: '2',
@@ -47,20 +48,27 @@ async function makeOidcAndAppKey() {
     workflow_ref: workflowRef,
     ref: 'refs/heads/main',
     actor: 'release-bot',
+    ...claims,
   })
     .setProtectedHeader({ alg: 'RS256', kid: 'oidc-key' })
     .setIssuer(oidcIssuer)
     .setAudience(oidcAudience)
     .setIssuedAt()
     .setExpirationTime('5m')
-    .sign(await importPKCS8(privatePem, 'RS256'));
+    .sign(await importPKCS8(fixture.oidcPrivateKey, 'RS256'));
+}
+
+async function makeOidcAndAppKey() {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const privatePem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+  const publicJwk = publicKey.export({ format: 'jwk' });
   const appKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  return {
-    jwt,
+  const fixture = {
     oidcPrivateKey: privatePem,
     jwks: { keys: [{ ...publicJwk, kid: 'oidc-key', alg: 'RS256', use: 'sig' }] },
     appPrivateKey: appKey.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
   };
+  return { ...fixture, jwt: await signOidc(fixture, {}) };
 }
 
 function makeEnv(fixture: Awaited<ReturnType<typeof makeOidcAndAppKey>>) {
@@ -98,7 +106,7 @@ function makeEnv(fixture: Awaited<ReturnType<typeof makeOidcAndAppKey>>) {
   } as any;
 }
 
-function projectBody() {
+function projectBody(overrides: Record<string, unknown> = {}) {
   return {
     tenantId: 'ten_1',
     projectId: 'prj_1',
@@ -109,13 +117,35 @@ function projectBody() {
       name: 'production',
       minApprovals: 1,
     }],
+    ...overrides,
   };
 }
 
-function makeGithubFetch(jwks: unknown) {
+async function createProject(env: ReturnType<typeof makeEnv>, overrides: Record<string, unknown> = {}) {
+  const response = await worker.fetch(new Request('https://example.com/v1/admin/projects', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.ADMIN_SECRET}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(projectBody(overrides)),
+  }), env);
+  expect(response.status).toBe(200);
+}
+
+// `branchHeads` maps a branch name to its head sha, or to the Response GitHub gives for it.
+function makeGithubFetch(jwks: unknown, branchHeads: Record<string, string | Response> = {}) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.pathname === '/jwks') return Response.json(jwks);
+    const branchPrefix = `/repos/${repository}/branches/`;
+    if (url.pathname.startsWith(branchPrefix)) {
+      const head = branchHeads[decodeURIComponent(url.pathname.slice(branchPrefix.length))];
+      if (head instanceof Response) return head;
+      return head
+        ? Response.json({ name: 'branch', commit: { sha: head } })
+        : new Response('not found', { status: 404 });
+    }
     if (url.pathname === '/app/installations/9001/access_tokens') {
       return Response.json({ token: 'installation-token', expires_at: '2030-01-01' });
     }
@@ -319,5 +349,184 @@ describe('multi-tenant approval routes', () => {
     ), env);
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'invalid_request' });
+  });
+});
+
+describe('workflow ref allow-list', () => {
+  const workflow = `${repository}/.github/workflows/release.yml`;
+  const tagRef = `${workflow}@refs/tags/v1.0.0`;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  let branchHeads: Record<string, string | Response>;
+
+  async function mintTicket(
+    fixture: Awaited<ReturnType<typeof makeOidcAndAppKey>>,
+    env: ReturnType<typeof makeEnv>,
+    claims: Record<string, unknown>
+  ) {
+    vi.stubGlobal('fetch', makeGithubFetch(fixture.jwks, branchHeads));
+    const response = await worker.fetch(new Request('https://example.com/v1/ci/tickets', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${await signOidc(fixture, claims)}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ environment: 'production' }),
+    }), env);
+    return { response, body: await response.json() as Record<string, unknown> };
+  }
+
+  it('issues a ticket for a tag whose commit is the head of the allowed branch', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = { main: sha };
+    await createProject(env);
+
+    const { response, body } = await mintTicket(fixture, env, {
+      workflow_ref: tagRef,
+      ref: 'refs/tags/v1.0.0',
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ requestId: expect.stringMatching(/^apr_/), tenantId: 'ten_1' });
+    expect(body.ticket).toMatch(/^ey/);
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input)))
+      .toContainEqual(`https://api.github.com/repos/${repository}/branches/main`);
+  });
+
+  it('denies a tag whose commit is behind the allowed branch', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = { main: 'c'.repeat(40) };
+    await createProject(env);
+
+    const { response, body } = await mintTicket(fixture, env, {
+      workflow_ref: tagRef,
+      ref: 'refs/tags/v1.0.0',
+    });
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({
+      error: 'scope_denied',
+      reason: 'workflow_ref_not_allowed',
+      detail: 'tag v1.0.0 is not at the head of main',
+    });
+  });
+
+  it('denies a tag of another workflow without asking for a branch head', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = { main: sha };
+    await createProject(env);
+
+    const { response, body } = await mintTicket(fixture, env, {
+      workflow_ref: `${repository}/.github/workflows/other.yml@refs/tags/v1.0.0`,
+      ref: 'refs/tags/v1.0.0',
+    });
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'scope_denied', reason: 'workflow_ref_not_allowed' });
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/branches/'))).toBe(false);
+  });
+
+  it('denies a tag when the list holds no branch for that workflow', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = { main: sha };
+    await createProject(env, {
+      allowedWorkflowRefs: [`${workflow}@refs/tags/v0.9.0`],
+    });
+
+    const { response, body } = await mintTicket(fixture, env, {
+      workflow_ref: tagRef,
+      ref: 'refs/tags/v1.0.0',
+    });
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'scope_denied', reason: 'workflow_ref_not_allowed' });
+  });
+
+  it('accepts a tag that is listed as is, without a branch lookup', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = {};
+    await createProject(env, { allowedWorkflowRefs: [tagRef] });
+
+    const { response, body } = await mintTicket(fixture, env, {
+      workflow_ref: tagRef,
+      ref: 'refs/tags/v1.0.0',
+    });
+
+    expect(response.status).toBe(200);
+    expect(body.ticket).toMatch(/^ey/);
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/branches/'))).toBe(false);
+  });
+
+  it('still denies a run from a branch that is not listed', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = { main: sha };
+    await createProject(env);
+
+    const { response, body } = await mintTicket(fixture, env, {
+      workflow_ref: `${workflow}@refs/heads/develop`,
+      ref: 'refs/heads/develop',
+    });
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'scope_denied', reason: 'workflow_ref_not_allowed' });
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/branches/'))).toBe(false);
+  });
+
+  it('reads every branch listed for the workflow', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = { main: 'c'.repeat(40), 'release/1.x': sha };
+    await createProject(env, { allowedWorkflowRefs: [workflowRef, `${workflow}@refs/heads/release/1.x`] });
+
+    const { response } = await mintTicket(fixture, env, {
+      workflow_ref: tagRef,
+      ref: 'refs/tags/v1.0.0',
+    });
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input)))
+      .toContainEqual(`https://api.github.com/repos/${repository}/branches/release%2F1.x`);
+  });
+
+  it('fails closed when a branch head cannot be read', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = { main: new Response('boom', { status: 500 }) };
+    await createProject(env);
+
+    const { response, body } = await mintTicket(fixture, env, {
+      workflow_ref: tagRef,
+      ref: 'refs/tags/v1.0.0',
+    });
+
+    expect(response.status).toBe(502);
+    expect(body).toEqual({ error: 'provider_unavailable' });
+  });
+
+  it('denies a tag when the allowed branch is gone', async () => {
+    const fixture = await makeOidcAndAppKey();
+    const env = makeEnv(fixture);
+    branchHeads = {};
+    await createProject(env);
+
+    const { response, body } = await mintTicket(fixture, env, {
+      workflow_ref: tagRef,
+      ref: 'refs/tags/v1.0.0',
+    });
+
+    expect(response.status).toBe(403);
+    expect(body).toMatchObject({ error: 'scope_denied', reason: 'workflow_ref_not_allowed' });
   });
 });

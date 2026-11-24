@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2 - 2026-11-25
+
+- Accept a workflow ref of the form `@refs/tags/<tag>` when the tagged commit is
+  the head of a branch listed in `allowedWorkflowRefs` for the same workflow.
+  Runs started by a release tag used to be refused with
+  `workflow_ref_not_allowed`.
+- Name the tag and the branch in that refusal when the tag is on an older commit.
+
 ## 1.2.1 - 2026-10-28
 
 - Treat an empty successful GitHub deployment-approval response as success
